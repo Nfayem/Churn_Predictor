@@ -16,12 +16,14 @@ def load_lottie_animation(url):
 # Example of how to use this in a page
 def display_lottie_on_page(page_name):
     lottie_urls = {
-        "Login": "https://assets8.lottiefiles.com/packages/lf20_ktwnwv5m.json",
+        "Sign_Up": "https://lottie.host/0fd6e98b-0ace-4f1e-a801-d86331f4cc5d/f4yuXA2ioF.json",
+        "Login": "https://lottie.host/eae02fe9-b668-45dd-a630-f37bf69aa5cb/SHJKStoKhR.json",
         "Home": "https://lottie.host/f3734960-8bd5-4e1e-94c7-57787a497ac7/dXSGaeZhUf.json",
+        "Account": "https://lottie.host/7be714de-5b8b-499a-ac6b-80363094675a/JSmWux7ypN.json",
         "Data Overview": "https://assets5.lottiefiles.com/private_files/lf30_5ttqPi.json",
         "Analytics Dashboard": "https://assets1.lottiefiles.com/packages/lf20_o6spyjnc.json",
-        "Historical Insights": "https://assets7.lottiefiles.com/packages/lf20_jcikwtux.json",
-        "Future Projections": "https://lottie.host/f62700df-68f9-4858-a0e5-c3896fad8bec/zw3ny4manX.json"        
+        "History Overview": "https://lottie.host/f2dd5f4d-a43e-4836-b6b3-a3aac326018d/C1DlvH4nQ4.json",
+        "Future Projections": "https://lottie.host/f52a4606-dba8-41e5-8fdc-6cc6552034c4/N8AlKsvPww.json"        
     }
 
     if page_name in lottie_urls:

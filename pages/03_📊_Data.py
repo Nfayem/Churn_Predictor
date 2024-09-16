@@ -1,13 +1,20 @@
+# Standard library imports
+import base64
 import os
 import sqlite3
-import streamlit as st
-from io import BytesIO
-import pandas as pd
 import time
-import base64
+from io import BytesIO
+
+# Third-party imports
+import pandas as pd
+import numpy as np
+import streamlit as st
 from sklearn.impute import SimpleImputer
+
+# Local application imports
 from utils.login import invoke_login_widget
 from utils.lottie import display_lottie_on_page
+
 
 # Invoke the login form
 invoke_login_widget('Data Overview')
@@ -15,18 +22,19 @@ invoke_login_widget('Data Overview')
 # Fetch the authenticator from session state
 authenticator = st.session_state.get('authenticator')
 
+# Ensure the authenticator is available
 if not authenticator:
     st.error("Authenticator not found. Please check the configuration.")
     st.stop()
 
 # Check authentication status
 if st.session_state.get("authentication_status"):
-    st.title("Data Navigator")
     username = st.session_state['username']
+    st.title("Data Navigator")
+    st.write("---")
 
-    # Display Lottie animation for the data page
-    with st.container():
-        st.write("---")
+    # Page Introdution
+    with st.container():        
         left_column, right_column = st.columns(2)
         with left_column:
             st.write(
@@ -44,14 +52,16 @@ if st.session_state.get("authentication_status"):
     # Load the initial data from a local file
     @st.cache_data(persist=True, show_spinner=False)
     def load_initial_data():
-        df = pd.read_csv('./data/LP2_train_final.csv')
+        df = pd.read_csv('./data/LP4_template.csv')
         return df
     
     initial_df = load_initial_data()
     
+    # Sidebar for file upload (CSV or Excel)
     st.sidebar.header("Data Upload")
     uploaded_file = st.sidebar.file_uploader("Upload your CSV or Excel file", type=["csv", "xlsx"])
 
+    # Load the uploaded file (either CSV or Excel)
     @st.cache_data(persist=True, show_spinner=False)
     def load_uploaded_data(file):
         if file is not None:
@@ -66,24 +76,7 @@ if st.session_state.get("authentication_status"):
                 return None
         return None
     
-    # Function to save the uploaded file with a unique name
-    def save_uploaded_file(file, username):
-        # Ensure the directory exists
-        save_dir = f"./data/{username}"
-        os.makedirs(save_dir, exist_ok=True)
-
-        # Determine the next file number
-        existing_files = os.listdir(save_dir)
-        file_count = len(existing_files) + 1
-
-        # Save the file
-        file_extension = 'csv' if file.name.endswith('.csv') else 'xlsx'
-        save_path = os.path.join(save_dir, f"{username}_file{file_count}.{file_extension}")
-        with open(save_path, "wb") as f:
-            f.write(file.getbuffer())
-
-        return save_path
-    
+    # Function to check if the uploaded data structure matches the template structure
     def validate_data_structure(uploaded_df, template_df):
         # Compare column names
         if list(uploaded_df.columns) != list(template_df.columns):
@@ -95,6 +88,7 @@ if st.session_state.get("authentication_status"):
         
         return True
     
+    # Function to save the uploaded file as a SQLite database
     def save_uploaded_file_as_sqlite(file, username):
         # Ensure the directory exists
         save_dir = f"./data/{username}"
@@ -103,7 +97,7 @@ if st.session_state.get("authentication_status"):
         # Define the path for the user's SQLite database
         db_path = os.path.join(save_dir, f"{username}.db")
 
-        # Connect to the SQLite database (it will be created if it doesn't exist)
+        # Connect to the SQLite database
         conn = sqlite3.connect(db_path)
 
         # Get existing tables and determine the next table number
@@ -120,14 +114,13 @@ if st.session_state.get("authentication_status"):
         else:
             next_table_num = 1
 
-        # Determine the required padding based on the number of digits in next_table_num
         # Pad the table number with leading zeros based on the length of the highest table number
         pad_length = len(str(next_table_num))
         table_name = f"{username}_table{str(next_table_num).zfill(pad_length)}"
 
         # Save the DataFrame to the new table in the SQLite database
         try:
-            file.seek(0)  # Reset file pointer to the start
+            file.seek(0)  
             if file.name.endswith('.csv'):
                 df = pd.read_csv(file)
             elif file.name.endswith('.xlsx'):
@@ -155,6 +148,7 @@ if st.session_state.get("authentication_status"):
 
         return df, table_name, db_path
     
+    # Function to generate download buttons for the original data in multiple formats
     def generate_download_buttons_original(df):
         col1, col2, col3, col4 = st.columns(4)
 
@@ -205,7 +199,7 @@ if st.session_state.get("authentication_status"):
                 key="original_json"
             )
 
-    
+    # Function to generate download buttons for the filtered data in multiple formats
     def generate_download_buttons_filtered(df):
         col1, col2, col3, col4 = st.columns(4)
 
@@ -256,7 +250,6 @@ if st.session_state.get("authentication_status"):
                 key="filtered_json"
             )
 
-
     # Load data from the uploaded file or use the initial data
     uploaded_df = load_uploaded_data(uploaded_file)
     df = uploaded_df if uploaded_df is not None else initial_df
@@ -271,7 +264,7 @@ if st.session_state.get("authentication_status"):
             providing a visual representation of the data structure.
             """
         )
-        # generate_download_buttons_original(initial_df)
+        
     else:
         st.subheader("📂 Uploaded Dataset")
         st.write(
@@ -282,12 +275,8 @@ if st.session_state.get("authentication_status"):
             """
         )
 
-        # Save the uploaded dataset
-        save_path = save_uploaded_file(uploaded_file, username)
+        # Save the uploaded dataset        
         sqldf, table_name, db_path = save_uploaded_file_as_sqlite(uploaded_file, username)
-
-        # Generate download buttons for different file formats
-        # generate_download_buttons_original(sqldf)
 
         # Create a sidebar placeholder for the success message
         success_placeholder = st.sidebar.empty()
@@ -302,7 +291,7 @@ if st.session_state.get("authentication_status"):
         success_placeholder.empty()
 
         # Define the list of specific columns to check and coerce
-        columns_to_coerce = ['Tenure', 'MonthlyCharges', 'TotalCharges', 'AvgMonthlyCharges', 'MonthlyChargesToTotalChargesRatio']
+        columns_to_coerce = ['tenure', 'Tenure', 'MonthlyCharges', 'TotalCharges', 'AvgMonthlyCharges', 'MonthlyChargesToTotalChargesRatio']
 
         try:
             df = df.apply(pd.to_numeric, errors='ignore') 
@@ -318,22 +307,49 @@ if st.session_state.get("authentication_status"):
             st.error(f"An error occurred while processing the column '{column}': {e}")
             st.warning(
                 """
-                Please refer to the Data Overview page to apply the correct data structure, 
-                ensuring numerical columns have strictly numeric values and categorical columns have strictly categorical values.
+                Please refer to the column description below to apply the correct data structure, 
+                ensuring numerical columns have strictly numeric values and categorical columns 
+                have strictly categorical values.
                 """
             )
             st.stop() 
         
-    # Ensure 'customer_id' is set as the index
-    df.set_index('customerID', inplace=True)
+    # Check if 'customerID' exists as a column
+    if 'customerID' in df.columns:
+        df.set_index('customerID', inplace=True)
+
+    # Capitalize the first letter of each column name if it starts with a lowercase letter
+    df.columns = [col.capitalize() if col[0].islower() else col for col in df.columns]
+
+    # Iterate through each column in the DataFrame except 'Churn'
+    for column in df.columns:
+        if column != 'Churn':
+            # Check if the column data type is either 'object' (for strings) or 'category'
+            if df[column].dtype in ['object', 'category']:
+                # Replace any NaN values in the column with 'Unknown'
+                df[column].replace(np.nan, 'Unknown', inplace=True)
+
+    # Convert 'Unknown' back to NaN in case it exists
+    df['Churn'].replace('Unknown', np.nan, inplace=True)
+
+    # Impute missing values in 'Churn' using the most frequent value (mode)
+    churn_imputer = SimpleImputer(strategy='most_frequent')
+    df['Churn'] = churn_imputer.fit_transform(df[['Churn']]).flatten()
 
     # Ensure numerical columns are correctly typed
     df = df.apply(pd.to_numeric, errors='ignore') 
 
     # Handle missing values
     numerical_columns = df.select_dtypes(include=['float64', 'int64']).columns.tolist()
+    int64_columns = df.select_dtypes(include=['int64']).columns.tolist()
+
+    # Impute numerical columns with median
     numerical_imputer = SimpleImputer(strategy='median')
     df[numerical_columns] = numerical_imputer.fit_transform(df[numerical_columns])
+
+    # Convert columns that were originally int64 back to int64
+    for column in int64_columns:
+        df[column] = df[column].astype('int64')
 
     # Sidebar widgets for numerical filters
     st.sidebar.header("Numerical Filter Options")
@@ -349,18 +365,10 @@ if st.session_state.get("authentication_status"):
                 """
                 Displays a quick statistical overview of the dataset.
                 This summary provides key insights into the data, such as mean, median,
-                and distribution, helping users understand the general characteristics of their data at a glance. 
+                and distribution, helping users understand the general characteristics 
+                of their data at a glance. 
                 """
                 )
-           
-        # st.subheader("Data Summary")
-        # st.write(
-        #     """
-        #     Offers a quick statistical overview of the dataset. 
-        #     This summary provides key insights into the data, such as mean, median, 
-        #     and distribution, helping users understand the general characteristics of their data.
-        #     """
-        # )
 
                 # Summary for numerical features
                 numeric_summary_df = df.describe().T.reset_index()
@@ -388,16 +396,6 @@ if st.session_state.get("authentication_status"):
                     and making the exploration more targeted and efficient.
                     """
                 )
-
-        # # Interactive filters
-        # st.subheader("🧹 Filter Data")
-        # st.write(
-        #     """
-        #     Enables interactive filtering of the dataset based on specific columns. 
-        #     This tool allows users to drill down into the data, focusing on subsets of interest, 
-        #     and making the exploration more targeted and efficient.            
-        #     """
-        # )
 
                 # Dynamically detect numerical columns
                 numerical_columns = df.select_dtypes(include=['float64', 'int64']).columns.tolist()
@@ -461,18 +459,7 @@ if st.session_state.get("authentication_status"):
                                 (filtered_data[column] >= min_val) & (filtered_data[column] <= max_val)
                             ]
 
-                        # Add filter for specific customer IDs
-                        # options = [''] + list(unique_customer_ids)  # Add empty string as the first option
-                        # selected_customer_id = st.sidebar.selectbox("Select a Customer ID", options, format_func=lambda x: str(x) if x else 'All Customers')
-
-                        # if not selected_customer_id == '':
-                            # filtered_data = filtered_data[filtered_data.index == selected_customer_id]
-                            # st.write(f"Showing data for {selected_customer_id}.")
-
-                        # st.write("Download the filtered dataset in one of the following formats:")
-
-                        # generate_download_buttons_filtered(filtered_data)
-
+                        # Display the filtered DataFrame
                         st.dataframe(filtered_data)
 
                         # Display numerical and categorical summaries only if no specific customer is selected
@@ -507,11 +494,9 @@ if st.session_state.get("authentication_status"):
                     **Important:** It is highly recommended to upload clean data with minimal missing values 
                     for the best results. For categorical columns, missing values can be replaced with 'Unknown' 
                     to facilitate analysis. However, the app is designed to handle numerical missing values 
-                    automatically to ensure proper data representation and accurate results.
-
-                    When uploading data to the Future Projections page under the Insights and Forecasting section, 
-                    it is advisable to retain the original missing values for both categorical and numerical data
-                    to ensure accuracy in forecasting models.
+                    automatically to ensure proper data representation and accurate results. 
+                    It is especially advisable to retain the original missing values for both categorical and numerical data
+                    to ensure accuracy in forecasting models on the future projections page.
                     """
                 )
                 # Create the DataFrame
@@ -524,6 +509,7 @@ if st.session_state.get("authentication_status"):
                     'float64': 'Numerical'
                 })
 
+                # Reset the index
                 df_info = df_info.reset_index(drop=True)
 
                 # Set the index to start from 1
@@ -532,6 +518,7 @@ if st.session_state.get("authentication_status"):
                 # Display the table
                 st.table(df_info)
 
+                # Create a description dictionary for the expected features
                 descriptions = {
                     'Gender': 'Whether the customer is male or female',
                     'SeniorCitizen': 'Whether a customer is a senior citizen (Yes or No)',
@@ -566,67 +553,16 @@ if st.session_state.get("authentication_status"):
                     Both the original and filtered datasets are available for download in the following formats: Excel, Stata, HTML, and JSON.
                     """
                 )
+                # Provide options to download the original data
                 st.write("##### Download Original Data")
                 generate_download_buttons_original(df)
                 
-                # Provide options to download the filtered data if applicable
+                # Provide options to download the filtered data
                 st.write("##### Download Filtered Data")
                 generate_download_buttons_filtered(filtered_data)
-
 else:
-    st.warning("Please login to access this page.")
+    st.warning("Please log in to explore your data.")
 
-
-            
-        
-
-
-        # st.subheader("Column Description")
-        # st.write(
-        #     """
-        #     This section provides comprehensive descriptions of each column in the dataset, 
-        #     helping users understand the required structure and content to ensure alignment 
-        #     with analysis objectives. Consistency in data structure is critical, particularly 
-        #     when users upload datasets for analysis on the prediction page.
-
-        #     **Important:** It is highly recommended to upload clean data with minimal missing values 
-        #     for the best results. For categorical columns, missing values can be replaced with 'Unknown' 
-        #     to facilitate analysis. However, the app is designed to handle numerical missing values 
-        #     automatically to ensure proper data representation and accurate results.
-
-        #     When uploading data to the Future Projections page under the Insights and Forecasting section, 
-        #     it is advisable to retain the original missing values for both categorical and numerical data
-        #     to ensure accuracy in forecasting models.
-        #     """
-        # )
-
-
-        # descriptions = {
-        #     'Gender': 'Whether the customer is male or female',
-        #     'SeniorCitizen': 'Whether a customer is a senior citizen (Yes or No)',
-        #     'Partner': 'Customer has a partner (Yes, No)',
-        #     'Dependents': 'Customer has dependents (Yes, No)',
-        #     'Tenure': 'Months the customer has stayed with the company',
-        #     'PhoneService': 'Customer has phone service (Yes, No)',
-        #     'MultipleLines': 'Customer has multiple lines (Yes, No phone service, No)',
-        #     'InternetService': 'Internet service provider (DSL, Fiber Optic, No)',
-        #     'OnlineSecurity': 'Customer has online security (Yes, No, No internet service)',
-        #     'OnlineBackup': 'Customer has online backup (Yes, No, No internet service)',
-        #     'DeviceProtection': 'Customer has device protection (Yes, No, No internet service)',
-        #     'TechSupport': 'Customer has tech support (Yes, No, No internet service)',
-        #     'StreamingTV': 'Customer has streaming TV (Yes, No, No internet service)',
-        #     'StreamingMovies': 'Customer has streaming movies (Yes, No, No internet service)',
-        #     'Contract': 'Contract term (Month-to-month, One year, Two year)',
-        #     'PaperlessBilling': 'Customer has paperless billing (Yes, No)',
-        #     'PaymentMethod': 'Payment method (Bank transfer (automatic), Credit card (automatic), Electronic check, Mailed check)',
-        #     'MonthlyCharges': 'Monthly charge to the customer',
-        #     'TotalCharges': 'Total charge to the customer',
-        #     'Churn': 'Whether the customer churned (Yes, No)',
-        #     'AvgMonthlyCharges': 'The average amount charged to the customer per month over their tenure.',
-        #     'MonthlyChargesToTotalChargesRatio': 'The ratio of the monthly charges to the total charges, indicating the proportion of total cost that is paid monthly.'            
-        # }
-        # for col, desc in descriptions.items():
-        #     st.write(f"- *{col}*: {desc}")
 
 # Function to convert an image to base64
 def image_to_base64(image_path):

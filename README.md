@@ -43,6 +43,8 @@ The Churn Predictor App is a cutting-edge tool designed for telco companies to a
 - **Data-Driven Decisions**: Empowers businesses to make informed decisions based on predictive analytics.
 - **Easy Machine Learning Integration**: Seamlessly integrates with your existing data infrastructure.
 - **Enhanced Customer Retention**: Enables proactive measures to reduce churn and increase customer loyalty.
+- **Comprehensive Insights:** Gain valuable insights from data visualizations and forecasts.
+- **Efficient Data Management:** Organize and manage data effectively.
 
 ## Demo
 ### Watch Demo Video

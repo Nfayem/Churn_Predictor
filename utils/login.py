@@ -51,15 +51,15 @@ def invoke_login_widget(page_title):
             st.sidebar.success("Data ready for naviagation 🧑🏾‍💻👍🏾")
         elif page_title == "Analytics Dashboard":
             st.sidebar.success("Explore the latest insights.🔎📶")
-        elif page_title == "Historical Insights":
-            st.sidebar.success("Delve into historical trends.⏳☎️")
+        elif page_title == "History Overview":
+            st.sidebar.success("Delve into past prediction trends.⏳☎️")
         elif page_title == "Future Projections":
             st.sidebar.success("Let's predict the future together!🔭🤞🏾")
         else:
             st.sidebar.success("You're successfully logged in!")
     elif st.session_state.get("authentication_status") is False:
-        st.error('Username/password is incorrect')
+        st.error('Username/password is incorrect.')
     elif st.session_state.get("authentication_status") is None:
-        st.warning('Please enter your username and password')
+        st.warning('Please enter your username and password.')
 
 

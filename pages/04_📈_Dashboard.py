@@ -1,15 +1,20 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
+# Standard library imports
 import base64
 import os
 import sqlite3
+
+# Third-party imports
+import pandas as pd
+import numpy as np
+import streamlit as st
 from sklearn.impute import SimpleImputer
 import plotly.express as px
 import plotly.graph_objects as go
-from streamlit_lottie import st_lottie
+
+# Local application imports
 from utils.login import invoke_login_widget
 from utils.lottie import display_lottie_on_page
+
 
 # Invoke the login form
 invoke_login_widget('Analytics Dashboard')
@@ -17,6 +22,7 @@ invoke_login_widget('Analytics Dashboard')
 # Fetch the authenticator from session state
 authenticator = st.session_state.get('authenticator')
 
+# Ensure the authenticator is available
 if not authenticator:
     st.error("Authenticator not found. Please check the configuration.")
     st.stop()
@@ -24,12 +30,11 @@ if not authenticator:
 # Check authentication status
 if st.session_state.get("authentication_status"):
     username = st.session_state['username']
-
     st.title('Telco Churn Analysis')
+    st.write("---")
 
-    # Display Lottie animation for the data page
-    with st.container():
-        st.write("---")
+    # Page Introdution
+    with st.container():        
         left_column, right_column = st.columns(2)
         with left_column:
             st.write("""
@@ -49,12 +54,16 @@ if st.session_state.get("authentication_status"):
     # Load the initial data from a local file
     @st.cache_data(persist=True, show_spinner=False)
     def load_initial_data():
-        df = pd.read_csv('./data/LP2_train_final.csv')
+        df = pd.read_csv('./data/LP4_template.csv')
         return df
     
     initial_df = load_initial_data()
-    data_source = 'initial'  # Flag to identify the source of the DataFrame
 
+    # Ensure 'data_source' is initialized in session state
+    if 'data_source' not in st.session_state:
+        st.session_state['data_source'] = 'initial'  
+
+    # Function to load the most recent table from the user's SQLite database
     def load_most_recent_table(username):
         # Define the path for the user's SQLite database
         db_path = f"./data/{username}/{username}.db"
@@ -66,7 +75,7 @@ if st.session_state.get("authentication_status"):
         # Connect to the SQLite database
         conn = sqlite3.connect(db_path)
 
-        # Get the list of tables and their creation order
+        # Get the most recent table name
         tables_query = """
         SELECT name FROM sqlite_master 
         WHERE type='table' 
@@ -78,8 +87,7 @@ if st.session_state.get("authentication_status"):
             if most_recent_table:
                 table_name = most_recent_table[0]
                 df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
-                global data_source
-                data_source = 'uploaded'  # Update flag to indicate data is from upload
+                st.session_state['data_source'] = 'uploaded'
             else:
                 st.error("No tables found in the database.")
                 return None, None
@@ -91,23 +99,55 @@ if st.session_state.get("authentication_status"):
 
         return df, table_name
 
-    # Load data from the uploaded file or use the initial data
-    if st.button("Preview Template Dataset"):
-        st.session_state['data_source'] = 'initial'
-        df = initial_df
+    # User interface for selecting the dataset
+    col1, col2 = st.columns(2)
 
+    with col1:
+        if st.button("Template Dataset"):
+            st.session_state['data_source'] = 'initial'
+
+    with col2:
+        if st.button("Uploaded Dataset"):
+            st.session_state['data_source'] = 'uploaded'
+
+    # Load the appropriate dataset based on the user's choice
+    if st.session_state['data_source'] == 'initial':
+        df = initial_df
+        table_name = "Template Dataset"
     else:
         uploaded_df, table_name = load_most_recent_table(username)
         df = uploaded_df if uploaded_df is not None else initial_df
 
-    if df is not None:
-        st.write(f"Most recent table: {table_name}" if data_source == 'uploaded' else "Using initial data")
+    # Display the dataset currently in use
+    st.write(f"Using dataset: {table_name}")
+
+    # Check if 'customerID' exists as a column
+    if 'customerID' in df.columns:
+        df.set_index('customerID', inplace=True)
+
+    # Capitalize the first letter of each column name if it starts with a lowercase letter
+    df.columns = [col.capitalize() if col[0].islower() else col for col in df.columns]
+
+    # Iterate through each column in the DataFrame except 'Churn'
+    for column in df.columns:
+        if column != 'Churn':
+            # Check if the column data type is either 'object' (for strings) or 'category'
+            if df[column].dtype in ['object', 'category']:
+                # Replace any NaN values in the column with 'Unknown'
+                df[column].replace(np.nan, 'Unknown', inplace=True)
+
+    # Convert 'Unknown' back to NaN in case it exists
+    df['Churn'].replace('Unknown', np.nan, inplace=True)
+
+    # Impute missing values in 'Churn' using the most frequent value (mode)
+    churn_imputer = SimpleImputer(strategy='most_frequent')
+    df['Churn'] = churn_imputer.fit_transform(df[['Churn']]).flatten()
 
     # Ensure numerical columns are correctly typed
     df = df.apply(pd.to_numeric, errors='ignore')
 
     # Define the list of specific columns to check and coerce
-    columns_to_coerce = ['Tenure', 'MonthlyCharges', 'TotalCharges', 'AvgMonthlyCharges', 'MonthlyChargesToTotalChargesRatio']
+    columns_to_coerce = ['tenure', 'Tenure', 'MonthlyCharges', 'TotalCharges', 'AvgMonthlyCharges', 'MonthlyChargesToTotalChargesRatio']
 
     try:
         # Ensure numerical columns are correctly typed for specific columns
@@ -119,15 +159,24 @@ if st.session_state.get("authentication_status"):
         st.warning(
             """
             Please refer to the Data Overview page to apply the correct data structure, 
-            ensuring numerical columns have strictly numeric values and categorical columns have strictly categorical values.
+            ensuring numerical columns have strictly numeric values and categorical columns 
+            have strictly categorical values.
             """
         )
-        st.stop()  
-
+        st.stop() 
+       
     # Handle missing values
     numerical_columns = df.select_dtypes(include=['float64', 'int64']).columns.tolist()
+    int64_columns = df.select_dtypes(include=['int64']).columns.tolist()
+
+    # Impute numerical columns with median
     numerical_imputer = SimpleImputer(strategy='median')
     df[numerical_columns] = numerical_imputer.fit_transform(df[numerical_columns])
+
+    # Convert columns that were originally int64 back to int64
+    for column in int64_columns:
+        df[column] = df[column].astype('int64')
+
 
     # Create a function to apply filters
     def apply_filters(df):
@@ -156,16 +205,22 @@ if st.session_state.get("authentication_status"):
     # Apply filters to the data
     filtered_data = apply_filters(df)
 
+    # Exploratory Data Analysis
     if selected_analysis == '':
         st.write("Please select an analysis type to begin.")
 
     elif selected_analysis == '🔍 Exploratory Data Analysis (EDA)':
         st.subheader("🕵🏾‍♂️ Churn EDA Dashboard")
         st.write(
-            "This dashboard provides an exploratory analysis of customer churn data. The visualizations help identify key demographic and account characteristics, correlations, and trends that can guide strategic decisions. Use the filters and plots to understand customer behavior and identify potential areas for improvement."
+            """This dashboard provides an exploratory analysis of customer churn data, 
+            including detailed insights into customer contractual obligations and subscription patterns. 
+            The visualizations help identify key demographic and account characteristics, correlations, 
+            and trends that can guide strategic decisions. Use the filters and plots to analyze customer 
+            behavior, understand contractual impacts, and identify potential areas for improvement in 
+            subscription models."""
         )
         
-        # Adjust grid layout to 2x2 for better alignment
+        # Customer Demographic Analysis
         st.markdown("#### Customer Demographic Analysis")
         st.write(
             "This section analyzes customer demographics to understand the distribution of key attributes such as gender, age, and relationships. By examining these factors, you can uncover patterns that might influence customer retention and acquisition."
@@ -191,7 +246,8 @@ if st.session_state.get("authentication_status"):
             with col2:
                 dependents_plot = px.histogram(filtered_data, x="Dependents", color="Churn", barmode="group", title="Dependents Distribution")
                 st.plotly_chart(dependents_plot, use_container_width=True)
-
+        
+        # Customer Account Analysis
         st.markdown("#### Customer Account Analysis")        
         st.write(
             "This section provides insights into customer account characteristics, including monthly and total charges, as well as tenure. The distributions and histograms reveal patterns in spending and account duration, which are crucial for understanding customer value and predicting churn."
@@ -238,6 +294,7 @@ if st.session_state.get("authentication_status"):
                 st.plotly_chart(heatmap)
             
             with col2:
+                filtered_data['Churn'] = filtered_data['Churn'].map({1: 'Yes', 0: 'No'}).fillna('Unknown')
                 # Pair Plot
                 pairplot_fig = px.scatter_matrix(
                     filtered_data[["Churn", "Tenure", "MonthlyCharges", "TotalCharges"]],
@@ -247,12 +304,13 @@ if st.session_state.get("authentication_status"):
                 )
                 st.plotly_chart(pairplot_fig)
 
+        # Customer Contractual Analysis
         st.markdown("#### Customer Contractual Analysis")
         st.write(
             "This section examines customer contracts and payment methods. It provides an overview of contract types, payment methods, and billing preferences, which can offer insights into customer loyalty and potential areas for optimizing pricing strategies."
         )
         with st.container():
-            filtered_data['Churn'] = filtered_data['Churn'].map({1: 'Yes', 0: 'No'})
+            
             col1, col2, col3 = st.columns(3)
 
             with col1:
@@ -267,11 +325,11 @@ if st.session_state.get("authentication_status"):
                 paperless_billing_plot = px.histogram(filtered_data, x="PaperlessBilling", color="Churn", barmode="group", title="Paperless Billing Distribution")
                 st.plotly_chart(paperless_billing_plot, use_container_width=True)
 
+        # Customer Subscription Analysis
         st.markdown("#### Customer Subscription Analysis")
         st.write(
             "This section explores customer service subscriptions, including phone, internet, and tech support services. It highlights the distribution of these services among customers and their relationship with churn behavior."
         )
-
         with st.container():
             col1, col2 = st.columns(2)
 
@@ -294,7 +352,8 @@ if st.session_state.get("authentication_status"):
                 techsupport_plot = px.histogram(filtered_data, x="TechSupport", color="Churn", barmode="group", title="Tech Support Distribution")
                 st.plotly_chart(techsupport_plot, use_container_width=True)
 
-        if data_source == 'initial':
+        # Key Business Insights for template dataset
+        if st.session_state['data_source'] == 'initial':
             st.markdown("""
             #### Key Business Insights
 
@@ -305,9 +364,9 @@ if st.session_state.get("authentication_status"):
             - Customers with dependents also exhibit lower churn rates, possibly due to family responsibilities influencing their decision to stay.
 
             ##### 2. Customer Account Analysis
-            - Higher monthly charges are associated with increased churn, indicating cost as a significant factor in customer retention.
-            - Total charges over time don’t strongly correlate with churn, suggesting that long-term cost might be less impactful than expected.
-            - Churn is more common among customers with shorter tenure, highlighting the need for early engagement strategies to boost retention.
+            - Higher monthly charges do not appear to have a clear relationship with churn, as the distributions for both churn and non-churn customers overlap significantly.
+            - There is no strong indication that total charges correlate with churn, with most customers having lower total charges, regardless of churn status.
+            - Churn is more frequent among customers with shorter tenures. As tenure increases, churn decreases, implying that newer customers are at a higher risk of leaving, while longer-term customers are more likely to stay.
 
             ##### 3. Customer Contractual Analysis
             - Month-to-month contracts have a significantly higher churn rate compared to one-year or two-year contracts, suggesting that encouraging longer-term commitments could reduce churn.
@@ -321,7 +380,7 @@ if st.session_state.get("authentication_status"):
             - The lack of tech support is strongly linked to higher churn, emphasizing the importance of providing reliable tech support to retain customers.
             """)
 
-
+    # Key Performance Indicators
     elif selected_analysis == '📊 Key Performance Indicators (KPIs)':
         st.subheader("📈 Churn KPI Dashboard")
 
@@ -349,7 +408,7 @@ if st.session_state.get("authentication_status"):
         unfiltered_avg_monthly_charges = df['MonthlyCharges'].mean()
         unfiltered_total_revenue = df['TotalCharges'].sum()
 
-        # Create a container to align metrics side by side
+        # Churn KPI metrics
         with st.container():
             col1, col2, col3, col4, col5 = st.columns(5)
 
@@ -408,7 +467,7 @@ if st.session_state.get("authentication_status"):
                     help="This percentage shows how total revenue has shifted after applying the selected filters."
                 )
 
-        # Additional KPI: Churn Rate Gauge
+        # KPI 6: Churn Rate Gauge
         churn_rate = filtered_data['Churn'].mean() * 100
         unfiltered_churn_rate = df['Churn'].mean() * 100
 
@@ -442,20 +501,21 @@ if st.session_state.get("authentication_status"):
             }
         ))
 
-        # Display the gauge in Streamlit
         st.plotly_chart(fig_churn_rate)
 
-        # Display a description or tooltip for the delta value in the gauge
+        # Display a description or Chunn Rate Gauge
         st.markdown("""
-        **Churn Rate Gauge:** The delta value represents the percentage change in churn rate after applying your selected filters, compared to the overall churn rate without any filters. This percentage shows how much the churn rate has increased or decreased relative to the previous value.
+        **Churn Rate Gauge:** This gauge displays the current predicted churn rate along with the percentage change (delta) compared to the previous churn rate you entered. It helps visualize how the churn rate has changed after applying the selected filters.
 
         - **Positive Delta (in red):** Indicates that the churn rate has increased after filtering, meaning more customers are leaving.
         - **Negative Delta (in green):** Indicates that the churn rate has decreased after filtering, meaning fewer customers are leaving.
 
-        In simpler terms, the gauge shows not just the current churn rate but also how the current rate compares to the rate before you applied the filters. For example, if the churn rate was 10% before filtering and now it’s 15%, a positive delta of 50% would show that the churn rate increased by half relative to the initial rate. This helps you see the impact of your filters on customer retention more clearly.
+        In simpler terms, the gauge shows not just the current churn rate but also how the current rate compares to the rate before you applied the filters. 
+        For example, if the churn rate was 10% before filtering and now it’s 15%, a positive delta of 50% would show that the churn rate increased by half relative to the initial rate. 
+        The gauge provides insights into whether customer retention has improved or worsened after applying your filters.
         """)
 
-        # Section: Distributions
+        # Distribution of Features
         st.markdown("#### Distribution of Features")
         st.markdown("""
         This section visualizes the distribution of key features in the dataset. It includes:
@@ -465,7 +525,6 @@ if st.session_state.get("authentication_status"):
         - **Phone Service Distribution:** Demonstrates the distribution of customers based on their phone service options.
         """)
 
-        # Distribution plots
         col1, col2 = st.columns(2)
 
         with col1:
@@ -491,7 +550,7 @@ if st.session_state.get("authentication_status"):
             st.plotly_chart(fig_phone_service_distribution, use_container_width=True)
 
 
-        # Section: Comparing Feature Parameters
+        # Comparing Feature Parameters Based on Churn Rate
         st.markdown("#### Comparing Feature Parameters Based on Churn Rate")
         st.markdown("""
         This section provides insights into how different feature parameters relate to churn rates. It includes:
@@ -505,7 +564,6 @@ if st.session_state.get("authentication_status"):
         - **Churn Rate by Phone Service:** Analyzes churn rates based on whether customers have phone service.
         """)
 
-        # Comparing Feature Parameters Plot
         with st.container():
             col1, col2 = st.columns(2)
 
@@ -571,7 +629,7 @@ if st.session_state.get("authentication_status"):
                 fig_churn_by_phone_service = px.bar(churn_by_phone_service, x='PhoneService', y='Churn', title='Churn Rate by Phone Service')
                 st.plotly_chart(fig_churn_by_phone_service)
 
-        # Sample KPI data
+        # KPI data
         kpi_data = {
             'KPI': ['Total Customers', 'Total Customers Retained', 'Churn Rate', 'Avg. Tenure', 'Avg. Monthly Charges', 'Total Revenue'],
             'Value': [f"{total_customers:,}", f"{total_customers_retained:,}", f"{churn_rate:.2f}%", f"{avg_tenure:.1f} months", f"${avg_monthly_charges:.2f}", f"${total_revenue:,.2f}"]
@@ -589,12 +647,11 @@ if st.session_state.get("authentication_status"):
                     color = 'green'
                 elif 30 <= percent_value < 70:
                     color = 'yellow'
-                else:  # percent_value >= 70
+                else:  
                     color = 'red'
             else:
                 color = 'lightblue'
             return f'color: {color}'
-
 
         # Function to apply conditional formatting
         def highlight_churn(index):
@@ -607,12 +664,62 @@ if st.session_state.get("authentication_status"):
         # Apply the highlight_churn function to the entire row
         styled_df = styled_df.apply(highlight_churn, axis=1)
 
-        # Display the styled DataFrame in Streamlit
+        # Display the styled DataFrame
         st.markdown("#### Key Performance Indicators (KPIs)")
         st.table(styled_df)
-else:
-    st.warning("Please login to access this page.")
 
+        # Key Business Insights for template dataset
+        if st.session_state['data_source']== "initial":
+            st.markdown("""
+            #### Key Business Insights
+            
+            ##### 1. Distribution of Features
+            **Contract Distribution:**
+            - **High Month-to-Month Contracts:** With **54.4%** of customers on month-to-month contracts, the business faces a higher risk of customer churn since this contract type typically lacks long-term commitment. This indicates a need for strategies to convert these customers to longer-term contracts, such as one-year or two-year plans, to improve retention.
+
+            **Payment Method Distribution:**
+            - **Electronic Check Dominance:** The preference for electronic checks (**33.7%**) suggests that a significant portion of customers prefers this method, which correlates with higher churn rates. This may indicate that customers using this payment method are less satisfied or more likely to leave, potentially due to perceived financial instability or dissatisfaction with the payment process. Efforts could be made to encourage the use of more stable, automated payment methods like credit cards.
+
+            **Internet Service Distribution:**
+            - **Fiber Optic Popularity:** Fiber optic being the most common internet service (**44.6%**) indicates that customers value high-speed internet. However, the higher churn rate among fiber optic users suggests possible issues with service quality or pricing that need to be addressed to retain these customers.
+
+            **Phone Service Distribution:**
+            - **High Phone Service Adoption:** The fact that **90.3%** of customers have phone service implies that phone services are still a critical part of the product offering. However, the slight increase in churn among these customers might indicate dissatisfaction with the service or pricing, suggesting a need for reviewing the phone service offerings.
+
+            ##### 2. Comparing Feature Parameters Based on Churn Rate
+            **Churn Rate by Gender:**
+            - **Equal Churn Across Genders:** The nearly equal churn rates between females and males suggest that gender does not significantly influence churn, meaning retention strategies can be uniformly applied across genders without needing gender-specific adjustments.
+
+            **Churn Rate by Tenure:**
+            - **Tenure's Protective Effect:** The decrease in churn rate as customer tenure increases highlights the importance of building long-term relationships with customers. Retention strategies should focus on the early stages of customer relationships, possibly offering incentives for loyalty early on to reduce churn.
+
+            **Churn Rate by Contract Type:**
+            - **Month-to-Month Vulnerability:** Customers on month-to-month contracts show the highest churn, underscoring the need for transitioning these customers to longer-term contracts. These could include incentives like discounts, additional services, or bundled offers to lock in commitment.
+
+            **Churn Rate by Payment Method:**
+            - **Risk with Electronic Checks:** The high churn rate among customers paying by electronic check indicates a potential risk group. Encouraging a switch to automated credit card payments could reduce churn, as these customers are less likely to leave.
+
+            **Churn Rate by Internet Service:**
+            - **Fiber Optic Churn Concerns:** The higher churn rate among fiber optic customers suggests that despite its popularity, there may be underlying issues such as pricing, competition, or service quality that need addressing to retain these customers.
+
+            **Churn Rate by Phone Service:**
+            - **Phone Service Challenges:** Although the majority of customers have phone service, the slight increase in churn for these customers might point to issues with the perceived value of this service, indicating a need to reassess and possibly enhance phone service offerings.
+
+            ##### 3. Financial Indicators
+            **Average Monthly Charges by Contract Type:**
+            - **Higher Charges for Short-Term Contracts:** The higher monthly charges for month-to-month contracts suggest that while these customers are generating more revenue per month, they are also at a higher risk of churn. This could indicate a need for balancing pricing strategies to make longer-term contracts more attractive without significantly lowering the overall revenue.
+
+            **Total Monthly Charges by Contract Type:**
+            - **Revenue Generation by Contract Length:** Two-year contracts generate the most revenue, indicating that customers on longer-term contracts contribute more to the financial health of the company. This reinforces the need to shift customers towards longer-term commitments.
+
+            ##### 4. Key Performance Indicators (KPIs)
+            - **Churn Rate:** The current churn rate is **26.50%**, which, while below the 30-40% threshold typically seen as high on an annual basis, is still significant. This rate suggests that retention strategies are partially effective, but there is still room for improvement. Focus should be on enhancing customer satisfaction and reducing churn further to maintain a healthy customer base.
+            - **Stable Customer Tenure:** An average tenure of **32.6 months** suggests that while there is a significant long-term customer base, efforts should still focus on extending this average by improving early retention.
+            - **Revenue and Charges Stability:** The average monthly charge of 65 us dollars and total revenue of 11.60M us dollars indicate a strong financial position. However, maintaining or growing this will depend on reducing churn and increasing customer satisfaction and retention.
+            """)
+else:
+    st.warning("Please log in to visualize your data.")
+    
 
 # Function to convert an image to base64
 def image_to_base64(image_path):
@@ -648,210 +755,3 @@ f"""
 """,
 unsafe_allow_html=True
 )
-
-
-
-
-
-
-# st.subheader("Business Insights")
-# st.markdown("""
-# - **Gender and Churn Rate**: The churn rate is consistent across both male and female customers, indicating that gender is not a significant factor in predicting churn.
-# - **Senior Citizens and Churn**: A lower percentage of senior citizens are customers, but those who are tend to have a higher churn rate, suggesting the need for targeted retention strategies for this group.
-# - **Partner and Dependent Influence**: Customers with partners or dependents are less likely to churn, which could indicate that these customers have more stable relationships with the service.
-# - **Monthly Charges and Churn**: Customers with higher monthly charges tend to have a higher churn rate. This suggests that customers may feel the service is not providing sufficient value for the cost, highlighting a potential area for pricing strategy adjustments.
-# - **Tenure and Churn**: Customers with shorter tenure are more likely to churn, indicating that early-stage customers need more engagement or incentives to continue with the service.
-# - **Contract Type and Churn**: Month-to-month contract customers show a significantly higher churn rate compared to those on longer-term contracts. This suggests that encouraging customers to commit to longer-term contracts could reduce churn.
-# - **Payment Method and Churn**: Electronic check payment method users exhibit a higher churn rate, which could imply dissatisfaction with the payment process or related services.
-# - **Paperless Billing and Churn**: Customers with paperless billing have a higher churn rate, which might indicate that these customers are more tech-savvy and have higher service expectations or a greater tendency to explore competitors.
-# """)
-
-
-# import streamlit as st
-# import os
-# import numpy as np
-# import pandas as pd
-# import plotly.express as px
-# import plotly.graph_objects as go
-
-
-# user_choice = st.sidebar.radio("Display a Dashboard", options = ["EDA Dashboard", "Analytical Dashboard"], key = "selected_dashboard")
-
-# if st.session_state["selected_dashboard"] == "EDA Dashboard":
-#     st.markdown("<h1 style='color: lightblue;'> 🔍 Exploratory Data Analysis</h1>", unsafe_allow_html=True)
-#     # Load data
-#     @st.cache_data(persist = True)
-#     def load_data():
-#         if os.path.exists("./data/LP2_train_final.csv"):
-#             data = pd.read_csv("./data/LP2_train_final.csv")
-#         else:
-#             st.error("Data file not found.")
-#         return data
-
-#     df = load_data()
-#     st.write(df.head())
-
-#     # Left, Middle, Right Columns
-#     left_column, middle_column, right_column = st.columns(3)
-
-#     # Boxplot for MonthlyCharges
-#     with left_column:
-#         fig = px.box(df, y="MonthlyCharges", title="Boxplot of Monthly Charges", color_discrete_sequence=["#C70039"])
-#         st.plotly_chart(fig)
-
-#     # Boxplot for TotalCharges
-#     with middle_column:
-#         fig = px.box(df, y="TotalCharges", title="Boxplot of Total Charges", color_discrete_sequence=["#900C3F"])
-#         st.plotly_chart(fig)
-
-#     # Correlation Heatmap with Annotations and No Color Bar
-#     with right_column:
-#         corr_matrix = df[["TotalCharges", "MonthlyCharges", "Tenure"]].dropna().corr()
-
-#         # Annotate the heatmap with correlation values
-#         heatmap = go.Figure(data=go.Heatmap(
-#             z=corr_matrix.values,
-#             x=corr_matrix.columns,
-#             y=corr_matrix.columns,
-#             colorscale="RdBu",
-#             text=corr_matrix.values,  # Add the correlation values as text
-#             texttemplate="%{text:.2f}",  # Format the text to 2 decimal places
-#             showscale=True  # Remove the color bar
-#         ))
-
-#         heatmap.update_layout(
-#             title="Correlation Matrix",
-#             xaxis_nticks=36
-#         )
-    
-#         st.plotly_chart(heatmap)
-
-#     # Pair Plot
-#     pairplot_fig = px.scatter_matrix(
-#         df[["Churn", "TotalCharges", "Tenure", "MonthlyCharges"]],
-#         dimensions=["TotalCharges", "Tenure", "MonthlyCharges"],
-#         color="Churn",
-#         title="Pairplot"
-#     )
-#     st.plotly_chart(pairplot_fig)
-
-#     # Left, Middle, Right Columns for Countplots
-#     left, middle, right = st.columns(3)
-
-#     # Countplot for SeniorCitizen
-#     with left:
-#         countplot_fig = px.histogram(df, x="Gender", color="Churn", barmode="group", title="Distribution of SeniorCitizen")
-#         st.plotly_chart(countplot_fig)
-
-#     # Countplot for InternetService
-#     with middle:
-#         countplot_fig = px.histogram(df, x="InternetService", color="Churn", barmode="group", title="Distribution of InternetService")
-#         st.plotly_chart(countplot_fig)
-
-#     # Countplot for Contract
-#     with right:
-#         countplot_fig = px.histogram(df, x="Contract", color="Churn", barmode="group", title="Distribution of Contract")
-#         st.plotly_chart(countplot_fig)
-
-
-
-# if st.session_state["selected_dashboard"] == "Analytical Dashboard":
-
-#     # Title of dashboard
-#     st.markdown("<h1 style='color: lightblue;'> 💡 Churn Indicator Dashboard</h1>", unsafe_allow_html=True)
-
-#     @st.cache_data(persist = True)
-#     def load_data():
-#         if os.path.exists("./data/LP2_train_final.csv"):
-#             data = pd.read_csv("./data/LP2_train_final.csv")
-#         else:
-#             st.error("Data file not found.")
-#         return data
-
-#     df = load_data()
-
-#     # Sidebar widgets
-#     st.sidebar.header("Filter Options")
-
-#     # Tenure slider
-#     tenure = st.sidebar.slider("Tenure", 0, int(df["Tenure"].max()), (0, int(df["Tenure"].max())))
-
-#     # Total Charges range slider
-#     total_charges = st.sidebar.slider("Total Charges", float(df["TotalCharges"].min()), float(df["TotalCharges"].max()), (float(df["TotalCharges"].min()), float(df["TotalCharges"].max())))
-
-#     # Monthly Charges range slider
-#     monthly_charges = st.sidebar.slider("Monthly Charges", float(df["MonthlyCharges"].min()), float(df["MonthlyCharges"].max()), (float(df["MonthlyCharges"].min()), float(df["MonthlyCharges"].max())))
-
-#     # Filter the data based on sidebar input
-#     filtered_df = df[(df["Tenure"] >= tenure[0]) & (df["Tenure"] <= tenure[1]) &
-#                     (df["TotalCharges"] >= total_charges[0]) & (df["TotalCharges"] <= total_charges[1]) &
-#                     (df["MonthlyCharges"] >= monthly_charges[0]) & (df["MonthlyCharges"] <= monthly_charges[1])]
-
-
-#     # Calculate deltas for metrics
-#     total_monthly_charge = filtered_df["MonthlyCharges"].sum()
-#     total_charge = filtered_df["TotalCharges"].sum()
-#     total_customers_retained = len(filtered_df[filtered_df["Churn"] == "No"])
-#     churn_rate = (len(filtered_df[filtered_df["Churn"] == "Yes"]) / len(filtered_df)) * 100
-
-#     # Calculate unfiltered values
-#     unfiltered_monthly_charge = df["MonthlyCharges"].sum()
-#     unfiltered_total_charge = df["TotalCharges"].sum()
-#     unfiltered_customers_retained = len(df[df["Churn"] == "No"])
-
-#     # Calculate deltas
-#     monthly_charge_delta = (total_monthly_charge - unfiltered_monthly_charge) / unfiltered_monthly_charge * 100
-#     total_charge_delta = (total_charge - unfiltered_total_charge) / unfiltered_total_charge * 100
-#     customers_retained_delta = (total_customers_retained - unfiltered_customers_retained) / unfiltered_customers_retained * 100
-
-
-#     left_column, middle_column, right_column = st.columns(3)
-
-#     with left_column:
-#         st.metric("Total Monthly Charge", f"${total_monthly_charge/1e3:,.2f}K", delta=f"{monthly_charge_delta:.2f}%")
-
-#     with middle_column:
-#         st.metric("Total Charge", f"${total_charge/1e6:,.2f}M", delta=f"{total_charge_delta:.2f}%")
-
-#     with right_column:
-#         st.metric("Total Customers Retained", total_customers_retained, delta=f"{customers_retained_delta:.2f}%")
-
-
-#     # Row 1: Churn Rate by Tenure and Churn Rate by InternetService
-#     col1, col2 = st.columns(2)
-#     with col1:
-#         churn_by_tenure = filtered_df.groupby("Tenure")["Churn"].value_counts(normalize=True).unstack().fillna(0)
-#         fig_tenure = px.line(churn_by_tenure, y="Yes", title="Churn Rate by Tenure", width=450, height=300)
-#         st.plotly_chart(fig_tenure)
-
-#     with col2:
-#         gauge_fig = go.Figure(go.Indicator(
-#             mode = "gauge+number",
-#             value = churn_rate,
-#             title = {"text": "Churn Rate (%)"},
-#             gauge = {
-#                 "axis": {"range": [0, 100]},
-#                 "bar": {"color": "blue"},
-#                 "steps": [
-#                     {"range": [0, 30], "color": "green"},
-#                     {"range": [30, 70], "color": "yellow"},
-#                     {"range": [70, 100], "color": "red"}],
-#                 "threshold": {
-#                     "line": {"color": "black", "width": 4},
-#                     "thickness": 0.75,
-#                     "value": churn_rate}}))
-#         gauge_fig.update_layout(width=450, height=300)
-#         st.plotly_chart(gauge_fig)
-
-#     # Row 2: Churn Rate by Gender and Churn Rate by Contract
-#     col1, col2 = st.columns(2)
-#     with col1:
-#         churn_by_internet_service = filtered_df[filtered_df["Churn"] == "Yes"].groupby("InternetService").size()
-#         fig_internet_service = px.pie(values=churn_by_internet_service, names=churn_by_internet_service.index, title="Churn Rate by InternetService", width=450, height=300)
-#         st.plotly_chart(fig_internet_service)
-
-#     with col2:
-#         churn_by_contract = filtered_df[filtered_df["Churn"] == "Yes"].groupby("Contract").size()
-#         fig_contract = px.bar(x=churn_by_contract.index, y=churn_by_contract.values, labels={"x":"Contract", "y":"Churn Rate (%)"}, title="Churn Rate by Contract", width=450, height=300)
-#         st.plotly_chart(fig_contract)
- 
